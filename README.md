@@ -2,7 +2,9 @@
 
 MCP server for monitoring and controlling **GoodWe solar inverters** over the local network.
 
-Built on the [`goodwe`](https://pypi.org/project/goodwe/) library (same as the Home Assistant integration) and the [Model Context Protocol](https://modelcontextprotocol.io/) Python SDK.
+Built on the [`goodwe`](https://pypi.org/project/goodwe/) library and the [Model Context Protocol](https://modelcontextprotocol.io/) Python SDK.
+
+> **Based on** the [Home Assistant GoodWe integration](https://github.com/home-assistant/core/tree/dev/homeassistant/components/goodwe) — the sensor definitions, operation modes, settings, and inverter family support are modelled directly after that implementation.
 
 ## Features
 
@@ -231,4 +233,10 @@ The pod becomes ready once the HTTP server is up. `inverter_connected` will be `
 
 ## License
 
-MIT
+See LICENSE file in the root of the repository.
+
+## Disclaimer
+
+This software is not affiliated with or endorsed by GoodWe Inc. Use at your own risk.
+This software is a personal project that I maintain in my free time.
+Refer to the licence for more information.
