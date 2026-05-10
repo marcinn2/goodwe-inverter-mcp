@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: goodwe-mcp
+data:
+  GOODWE_PORT: "8899"
+  GOODWE_FAMILY: ""          # leave empty for auto-detection

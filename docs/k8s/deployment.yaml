@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: goodwe-mcp
+  labels:
+    app: goodwe-mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: goodwe-mcp
+  template:
+    metadata:
+      labels:
+        app: goodwe-mcp
+    spec:
+      # hostNetwork gives the pod direct access to the node's network
+      # interfaces, which is the simplest way to reach a GoodWe inverter
+      # on the local LAN when running on a node in the same subnet.
+      # Remove and configure proper network routing if your cluster already
+      # routes LAN traffic into pods (e.g. via MetalLB or a flat network).
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+
+      containers:
+        - name: goodwe-mcp
+          image: goodwe-inverter-mcp:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          env:
+            - name: GOODWE_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: goodwe-mcp
+                  key: GOODWE_HOST
+            - name: GOODWE_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: goodwe-mcp
+                  key: GOODWE_PORT
+            - name: GOODWE_FAMILY
+              valueFrom:
+                configMapKeyRef:
+                  name: goodwe-mcp
+                  key: GOODWE_FAMILY
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 150m
+              memory: 128Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi

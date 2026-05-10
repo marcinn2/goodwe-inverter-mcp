@@ -1,0 +1,14 @@
+services:
+  goodwe-mcp:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      GOODWE_HOST: "${GOODWE_HOST}"       # set in .env or shell
+      GOODWE_PORT: "${GOODWE_PORT:-8899}"
+      GOODWE_FAMILY: "${GOODWE_FAMILY:-}"
+    # Needed when the inverter is on the host's local network
+    # and the container cannot reach it via bridge networking.
+    # Remove if your network setup routes the traffic correctly.
+    network_mode: host
+    restart: unless-stopped
