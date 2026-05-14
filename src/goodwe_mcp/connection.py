@@ -9,6 +9,11 @@ from goodwe import Inverter
 logger = logging.getLogger(__name__)
 
 
+def inverter_attr(inv: Inverter, name: str, fallback: str = "N/A") -> str:
+    """Safely read a string attribute that may be absent on some inverter families."""
+    return getattr(inv, name, None) or fallback
+
+
 class InverterConnection:
     """Manages a single persistent connection to a GoodWe inverter."""
 
@@ -51,11 +56,11 @@ class InverterConnection:
             )
             self._host = host
             self._port = port
-            logger.info("Connected to %s", self._inverter.model_name)
+            logger.info("Connected to %s", inverter_attr(self._inverter, "model_name"))
             return {
-                "model": self._inverter.model_name,
-                "serial_number": self._inverter.serial_number,
-                "firmware": self._inverter.firmware_version,
+                "model": inverter_attr(self._inverter, "model_name"),
+                "serial_number": inverter_attr(self._inverter, "serial_number"),
+                "firmware": inverter_attr(self._inverter, "firmware_version"),
                 "host": host,
                 "port": port,
             }

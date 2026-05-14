@@ -12,6 +12,9 @@ Built on the [`goodwe`](https://pypi.org/project/goodwe/) library and the [Model
 - Read and write all configurable inverter settings
 - Switch operation modes (general, eco, backup, peak-shaving, off-grid, …)
 - Control grid export limit and battery depth-of-discharge
+- 7 MCP resources: status, runtime, settings, power flow, daily energy, battery, sensor catalog
+- 6 built-in prompt templates for common workflows (status overview, diagnostics, optimisation, …)
+- Bearer token authentication for all HTTP transports
 - Four transport modes: **stdio**, **SSE**, **Streamable HTTP**, and **server** (SSE + Streamable HTTP combined)
 - Auto-connect via environment variables
 
@@ -84,6 +87,8 @@ goodwe-mcp --transport server --host 0.0.0.0 --port 8080
 --host HOST                                      Bind address for SSE/HTTP (default: 127.0.0.1)
 --port PORT                                      Listen port for SSE/HTTP (default: 8000)
 --log-level {DEBUG,INFO,WARNING,ERROR}           Logging verbosity (default: INFO)
+--auth-token TOKEN                               Bearer token required on all HTTP requests (env: MCP_AUTH_TOKEN)
+--base-url URL                                   Public base URL, e.g. https://mcp.example.com (env: MCP_BASE_URL)
 ```
 
 ### Environment variables
@@ -93,6 +98,67 @@ goodwe-mcp --transport server --host 0.0.0.0 --port 8080
 | `GOODWE_HOST` | Inverter IP / hostname for auto-connect on startup | — |
 | `GOODWE_PORT` | Inverter UDP/TCP port | `8899` |
 | `GOODWE_FAMILY` | Inverter family override (ET, EH, BT, BH, ES, EM, BP, DT, MS, NS, XS) | auto-detect |
+| `MCP_AUTH_TOKEN` | Bearer token required on all HTTP requests | — (auth disabled) |
+| `MCP_BASE_URL` | Public base URL of the server (used as OAuth issuer URL) | `http://<host>:<port>` |
+
+## Authentication
+
+Bearer token authentication is supported for all HTTP transports (`sse`, `streamable-http`, `server`).
+When enabled, every MCP request must include an `Authorization: Bearer <token>` header.
+The `/health` endpoint is always unprotected so Kubernetes probes continue to work.
+
+### Enable via environment variable (recommended)
+
+```bash
+export MCP_AUTH_TOKEN="$(openssl rand -hex 32)"
+goodwe-mcp --transport server --host 0.0.0.0 --port 8080
+```
+
+### Enable via CLI flag
+
+```bash
+goodwe-mcp --transport streamable-http --port 8080 --auth-token my-secret-token
+```
+
+### Claude Desktop / MCP client configuration
+
+Add the token to your client's MCP server configuration.  For example, with Claude Desktop
+using the `streamable-http` transport via a proxy that injects the header, or with any
+client that supports `Authorization` headers:
+
+```json
+{
+  "mcpServers": {
+    "goodwe": {
+      "url": "http://localhost:8080/mcp",
+      "headers": {
+        "Authorization": "Bearer my-secret-token"
+      }
+    }
+  }
+}
+```
+
+### Docker / Docker Compose
+
+Pass the token through the environment:
+
+```bash
+MCP_AUTH_TOKEN=my-secret-token GOODWE_HOST=192.168.1.100 \
+  docker compose -f docs/docker-compose.yml up -d
+```
+
+### Kubernetes
+
+Set the token in `docs/k8s/secret.yaml` before applying the manifests:
+
+```yaml
+stringData:
+  GOODWE_HOST: "192.168.1.100"
+  MCP_AUTH_TOKEN: "my-secret-token"
+```
+
+If `MCP_AUTH_TOKEN` is empty or not set, authentication is disabled and all HTTP endpoints are publicly accessible.
 
 ## Docker
 
@@ -215,6 +281,19 @@ The pod becomes ready once the HTTP server is up. `inverter_connected` will be `
 | `get_battery_dod` | Battery depth-of-discharge setting |
 | `set_battery_dod` | Set battery depth-of-discharge (0–99%) |
 
+## Prompts
+
+Pre-written prompt templates that MCP clients can fetch and use directly.
+
+| Prompt | Arguments | Description |
+|---|---|---|
+| `status_overview` | — | Full status report: connection, live power flow, battery, grid |
+| `battery_optimisation` | — | Review battery settings and suggest DoD / mode improvements |
+| `grid_export_config` | — | Check and adjust the grid export power limit |
+| `operation_mode_change` | — | Explain available modes and help switch to the right one |
+| `diagnose_issue` | `symptom` (optional) | Collect full diagnostics and identify problems |
+| `daily_energy_summary` | — | Today's energy counters as a human-readable table |
+
 ## Resources
 
 | URI | Description |
@@ -222,6 +301,10 @@ The pod becomes ready once the HTTP server is up. `inverter_connected` will be `
 | `inverter://status` | Connection status and device info (JSON) |
 | `inverter://runtime` | All live sensor values (JSON) |
 | `inverter://settings` | All configurable settings (JSON) |
+| `inverter://power/now` | Real-time power flow — PV, battery, grid and load in watts, grouped by kind |
+| `inverter://energy/today` | Today's energy counters — production, load, grid buy/sell, battery charge/discharge (kWh) |
+| `inverter://battery` | Battery sensors, DoD limit and current operation mode in one payload |
+| `inverter://sensors` | Static sensor catalog — id, name, unit and kind for every sensor (no live values) |
 
 ## Inverter families
 

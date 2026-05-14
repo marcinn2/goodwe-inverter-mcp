@@ -1,15 +1,18 @@
 import json
 import logging
 import os
+import secrets
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Optional
 
+from mcp.server.auth.middleware.bearer_auth import AccessToken
+from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
 from goodwe import OperationMode, SensorKind
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from goodwe_mcp.connection import inverter_conn
+from goodwe_mcp.connection import inverter_conn, inverter_attr
 
 logger = logging.getLogger(__name__)
 
@@ -44,20 +47,44 @@ _MODE_TO_NAME = {
 _NAME_TO_MODE = {v: k for k, v in _MODE_TO_NAME.items()}
 
 
+class StaticBearerVerifier:
+    """Verifies a single pre-shared bearer token using a timing-safe comparison."""
+
+    def __init__(self, token: str) -> None:
+        self._token = token
+
+    async def verify_token(self, token: str) -> AccessToken | None:
+        if not secrets.compare_digest(token.encode(), self._token.encode()):
+            return None
+        return AccessToken(token=token, client_id="static", scopes=[])
+
+
 def _err(exc: Exception) -> str:
     return f"Error ({type(exc).__name__}): {exc}"
 
 
 @asynccontextmanager
 async def _lifespan(_app: FastMCP) -> AsyncIterator[None]:
-    if os.environ.get("GOODWE_HOST"):
+    if os.environ.get("GOODWE_HOST") and not inverter_conn.is_connected:
         logger.info("Auto-connecting from GOODWE_HOST environment variable…")
         await inverter_conn.auto_connect_from_env()
     yield
 
 
-def build_mcp(host: str = "127.0.0.1", port: int = 8000) -> FastMCP:
+def build_mcp(
+    host: str = "127.0.0.1",
+    port: int = 8000,
+    auth_token: Optional[str] = None,
+    base_url: Optional[str] = None,
+) -> FastMCP:
     """Create and return a fully configured FastMCP instance."""
+
+    token_verifier: Optional[StaticBearerVerifier] = None
+    auth_settings: Optional[AuthSettings] = None
+    if auth_token:
+        token_verifier = StaticBearerVerifier(auth_token)
+        issuer_url = base_url or f"http://{host}:{port}"
+        auth_settings = AuthSettings(issuer_url=issuer_url, resource_server_url=None)
 
     server = FastMCP(
         "GoodWe Inverter",
@@ -69,6 +96,8 @@ def build_mcp(host: str = "127.0.0.1", port: int = 8000) -> FastMCP:
         host=host,
         port=port,
         lifespan=_lifespan,
+        token_verifier=token_verifier,
+        auth=auth_settings,
     )
 
     # ------------------------------------------------------------------
@@ -135,9 +164,9 @@ def build_mcp(host: str = "127.0.0.1", port: int = 8000) -> FastMCP:
         inv = inverter_conn.get_inverter()
         return (
             f"Connected to GoodWe inverter.\n"
-            f"  Model:    {inv.model_name}\n"
-            f"  Serial:   {inv.serial_number}\n"
-            f"  Firmware: {inv.firmware_version}\n"
+            f"  Model:    {inverter_attr(inv, 'model_name')}\n"
+            f"  Serial:   {inverter_attr(inv, 'serial_number')}\n"
+            f"  Firmware: {inverter_attr(inv, 'firmware_version')}\n"
             f"  Address:  {inverter_conn.host}:{inverter_conn.port}"
         )
 
@@ -147,9 +176,9 @@ def build_mcp(host: str = "127.0.0.1", port: int = 8000) -> FastMCP:
         try:
             inv = inverter_conn.get_inverter()
             return (
-                f"Model:    {inv.model_name}\n"
-                f"Serial:   {inv.serial_number}\n"
-                f"Firmware: {inv.firmware_version}\n"
+                f"Model:    {inverter_attr(inv, 'model_name')}\n"
+                f"Serial:   {inverter_attr(inv, 'serial_number')}\n"
+                f"Firmware: {inverter_attr(inv, 'firmware_version')}\n"
                 f"Address:  {inverter_conn.host}:{inverter_conn.port}"
             )
         except Exception as exc:
@@ -346,7 +375,7 @@ def build_mcp(host: str = "127.0.0.1", port: int = 8000) -> FastMCP:
         try:
             inv = inverter_conn.get_inverter()
             current = await inv.get_operation_mode()
-            supported = await inv.get_operation_modes()
+            supported = await inv.get_operation_modes(include_emulated=False)
             current_name = _MODE_TO_NAME.get(current, str(current))
             supported_names = [_MODE_TO_NAME.get(m, str(m)) for m in supported]
             return (
@@ -456,9 +485,9 @@ def build_mcp(host: str = "127.0.0.1", port: int = 8000) -> FastMCP:
         return json.dumps(
             {
                 "connected": True,
-                "model": inv.model_name,
-                "serial_number": inv.serial_number,
-                "firmware": inv.firmware_version,
+                "model": inverter_attr(inv, "model_name"),
+                "serial_number": inverter_attr(inv, "serial_number"),
+                "firmware": inverter_attr(inv, "firmware_version"),
                 "host": inverter_conn.host,
                 "port": inverter_conn.port,
             },
@@ -505,5 +534,225 @@ def build_mcp(host: str = "127.0.0.1", port: int = 8000) -> FastMCP:
             return json.dumps(result, indent=2)
         except Exception as exc:
             return json.dumps({"error": str(exc)})
+
+    @server.resource("inverter://power/now")
+    async def resource_power_now() -> str:
+        """Real-time power flow: PV, battery, grid and load — watts only."""
+        if not inverter_conn.is_connected:
+            return json.dumps({"error": "not connected"})
+        try:
+            inv = inverter_conn.get_inverter()
+            runtime_data = await inv.read_runtime_data()
+            result: dict[str, Any] = {}
+            for sensor in inv.sensors():
+                if sensor.id_ not in runtime_data:
+                    continue
+                if sensor.unit != "W":
+                    continue
+                kind_key = sensor.kind.name.lower() if sensor.kind else "other"
+                result.setdefault(kind_key, {})[sensor.id_] = {
+                    "name": sensor.name,
+                    "value": runtime_data[sensor.id_],
+                    "unit": "W",
+                }
+            return json.dumps(result, indent=2)
+        except Exception as exc:
+            return json.dumps({"error": str(exc)})
+
+    @server.resource("inverter://energy/today")
+    async def resource_energy_today() -> str:
+        """Today's energy counters: production, load, grid buy/sell, battery charge/discharge (kWh)."""
+        if not inverter_conn.is_connected:
+            return json.dumps({"error": "not connected"})
+        try:
+            inv = inverter_conn.get_inverter()
+            runtime_data = await inv.read_runtime_data()
+            result: dict[str, Any] = {}
+            for sensor in inv.sensors():
+                if sensor.id_ not in runtime_data:
+                    continue
+                if sensor.unit not in ("kWh", "Wh"):
+                    continue
+                name_lower = sensor.name.lower()
+                id_lower = sensor.id_.lower()
+                if not any(k in name_lower or k in id_lower for k in ("today", "daily", "_day", "day_")):
+                    continue
+                result[sensor.id_] = {
+                    "name": sensor.name,
+                    "value": runtime_data[sensor.id_],
+                    "unit": sensor.unit,
+                }
+            return json.dumps(result, indent=2)
+        except Exception as exc:
+            return json.dumps({"error": str(exc)})
+
+    @server.resource("inverter://battery")
+    async def resource_battery() -> str:
+        """Battery state: SOC, power, temperature, BMS data, depth-of-discharge and operation mode."""
+        if not inverter_conn.is_connected:
+            return json.dumps({"error": "not connected"})
+        try:
+            inv = inverter_conn.get_inverter()
+            runtime_data = await inv.read_runtime_data()
+
+            sensors: dict[str, Any] = {}
+            for sensor in inv.sensors():
+                if sensor.id_ not in runtime_data:
+                    continue
+                if sensor.kind not in (SensorKind.BAT, SensorKind.BMS):
+                    continue
+                sensors[sensor.id_] = {
+                    "name": sensor.name,
+                    "value": runtime_data[sensor.id_],
+                    "unit": sensor.unit,
+                }
+
+            dod: Any = None
+            try:
+                dod = await inv.get_ongrid_battery_dod()
+            except Exception:
+                pass
+
+            mode: Any = None
+            try:
+                current = await inv.get_operation_mode()
+                mode = _MODE_TO_NAME.get(current, str(current))
+            except Exception:
+                pass
+
+            return json.dumps(
+                {"sensors": sensors, "depth_of_discharge_pct": dod, "operation_mode": mode},
+                indent=2,
+            )
+        except Exception as exc:
+            return json.dumps({"error": str(exc)})
+
+    @server.resource("inverter://sensors")
+    async def resource_sensors() -> str:
+        """Static sensor catalog: id, name, unit and kind for every sensor (no live values)."""
+        if not inverter_conn.is_connected:
+            return json.dumps({"error": "not connected"})
+        try:
+            inv = inverter_conn.get_inverter()
+            result: dict[str, Any] = {}
+            for sensor in inv.sensors():
+                result[sensor.id_] = {
+                    "name": sensor.name,
+                    "unit": sensor.unit,
+                    "kind": sensor.kind.name if sensor.kind else None,
+                }
+            return json.dumps(result, indent=2)
+        except Exception as exc:
+            return json.dumps({"error": str(exc)})
+
+    # ------------------------------------------------------------------
+    # Prompts
+    # ------------------------------------------------------------------
+
+    @server.prompt(
+        title="System status overview",
+        description="Get a full status report: connection, live power flow, battery state, and grid metrics.",
+    )
+    def status_overview() -> str:
+        return (
+            "Use the available tools to give me a complete status overview of my GoodWe solar inverter.\n\n"
+            "Please:\n"
+            "1. Call get_connection_status to confirm the inverter is reachable.\n"
+            "2. Call get_runtime_data to read all live sensor values.\n"
+            "3. Call get_operation_mode to show the current mode.\n"
+            "4. Summarise the results in a clear, human-readable report covering:\n"
+            "   - PV production (current power and today's energy)\n"
+            "   - Battery state (SOC %, charging/discharging power)\n"
+            "   - Grid import/export\n"
+            "   - House load\n"
+            "   - Active operation mode\n"
+            "Highlight anything unusual or worth attention."
+        )
+
+    @server.prompt(
+        title="Battery optimisation advice",
+        description="Review battery settings and suggest depth-of-discharge and operation mode adjustments.",
+    )
+    def battery_optimisation() -> str:
+        return (
+            "I want to optimise my GoodWe inverter's battery usage. "
+            "Please use the available tools to analyse the current configuration and give concrete recommendations.\n\n"
+            "Steps:\n"
+            "1. Call get_runtime_data (filter: BAT) to see the current battery state.\n"
+            "2. Call get_battery_dod to read the depth-of-discharge limit.\n"
+            "3. Call get_operation_mode to check the current and available modes.\n"
+            "4. Call get_settings_data to review all battery-related settings.\n\n"
+            "Based on the data, advise me on:\n"
+            "- Whether the depth-of-discharge limit is appropriate for long battery lifespan.\n"
+            "- Which operation mode best fits my situation (self-consumption, backup, peak-shaving, eco).\n"
+            "- Any settings that look misconfigured or suboptimal.\n"
+            "- Concrete next steps, including which tool calls to make to apply your recommendations."
+        )
+
+    @server.prompt(
+        title="Grid export configuration",
+        description="Check and adjust the grid export power limit.",
+    )
+    def grid_export_config() -> str:
+        return (
+            "Help me configure the grid export limit on my GoodWe inverter.\n\n"
+            "1. Call get_grid_export_limit to show the current limit.\n"
+            "2. Call get_runtime_data (filter: PV) to show current PV production.\n"
+            "3. Call get_runtime_data (filter: GRID) to show current grid flow.\n\n"
+            "Explain what the export limit does, whether the current value looks correct, "
+            "and ask me how much power I am allowed to export to the grid so you can "
+            "call set_grid_export_limit with the right value if I want to change it."
+        )
+
+    @server.prompt(
+        title="Operation mode change",
+        description="Explain available operation modes and help pick the right one.",
+    )
+    def operation_mode_change() -> str:
+        return (
+            "I want to change my GoodWe inverter's operation mode.\n\n"
+            "1. Call get_operation_mode to show the current mode and all supported modes.\n"
+            "2. Call get_runtime_data to give context (battery SOC, PV output, grid state).\n\n"
+            "Then explain each supported mode in plain language — when it is useful and what it does — "
+            "and ask me which one I'd like to switch to. "
+            "Once I confirm, call set_operation_mode with the chosen mode."
+        )
+
+    @server.prompt(
+        title="Diagnose inverter issue",
+        description="Collect full diagnostics and help identify problems with the inverter.",
+    )
+    def diagnose_issue(symptom: str = "") -> str:
+        symptom_line = f"\nThe symptom I am seeing: {symptom}\n" if symptom.strip() else ""
+        return (
+            f"Help me diagnose a problem with my GoodWe solar inverter.{symptom_line}\n"
+            "Please collect full diagnostics:\n"
+            "1. Call get_connection_status.\n"
+            "2. Call get_device_info.\n"
+            "3. Call get_runtime_data (all sensors).\n"
+            "4. Call get_operation_mode.\n"
+            "5. Call get_settings_data.\n"
+            "6. Call get_battery_dod and get_grid_export_limit.\n\n"
+            "Review all the data and:\n"
+            "- Identify any sensor readings that look abnormal (zero production on a sunny day, "
+            "unexpected grid draw, battery not charging, etc.).\n"
+            "- Highlight settings that could be misconfigured.\n"
+            "- Suggest specific corrective actions, including which tool calls to make."
+        )
+
+    @server.prompt(
+        title="Energy summary for today",
+        description="Pull today's energy counters and produce a human-readable daily summary.",
+    )
+    def daily_energy_summary() -> str:
+        return (
+            "Give me a summary of today's energy figures from my GoodWe inverter.\n\n"
+            "1. Call get_runtime_data to read all sensor values.\n"
+            "2. Extract the daily energy counters "
+            "(look for sensors whose names contain 'today', 'daily', or 'day_' — "
+            "e.g. e_day, e_load_day, e_grid_buy_day, e_grid_sell_day, e_bat_charge_day, e_bat_discharge_day).\n\n"
+            "Present the results as a clear daily energy table with columns: category, energy (kWh). "
+            "Then add a brief interpretation: self-consumption ratio, grid dependency, battery utilisation."
+        )
 
     return server

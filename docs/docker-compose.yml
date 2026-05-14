@@ -4,9 +4,10 @@ services:
     ports:
       - "8000:8000"
     environment:
-      GOODWE_HOST: "${GOODWE_HOST}"       # set in .env or shell
+      GOODWE_HOST: "${GOODWE_HOST}"               # set in .env or shell
       GOODWE_PORT: "${GOODWE_PORT:-8899}"
       GOODWE_FAMILY: "${GOODWE_FAMILY:-}"
+      MCP_AUTH_TOKEN: "${MCP_AUTH_TOKEN:-}"       # optional: require Bearer auth on HTTP endpoints
     # Needed when the inverter is on the host's local network
     # and the container cannot reach it via bridge networking.
     # Remove if your network setup routes the traffic correctly.

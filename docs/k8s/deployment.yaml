@@ -51,6 +51,12 @@ spec:
                 configMapKeyRef:
                   name: goodwe-mcp
                   key: GOODWE_FAMILY
+            - name: MCP_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: goodwe-mcp
+                  key: MCP_AUTH_TOKEN
+                  optional: true
           livenessProbe:
             httpGet:
               path: /health
