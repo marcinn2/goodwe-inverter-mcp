@@ -80,3 +80,8 @@ spec:
             limits:
               cpu: 300m
               memory: 256Mi
+          # Log retention is controlled by your cluster's logging stack (e.g. Loki,
+          # Elasticsearch, or a node-level log rotation policy).  Inverter IP addresses
+          # in HTTP access logs may constitute personal data under GDPR; configure your
+          # log collector to enforce a retention limit (e.g. 30 days) and ensure etcd
+          # encryption at rest is enabled to protect Secrets stored in this cluster.

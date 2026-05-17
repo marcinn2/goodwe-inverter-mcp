@@ -361,6 +361,7 @@ def build_mcp(
 
             await inv.write_setting(setting_id, typed)
             unit = f" {meta.unit}" if meta.unit else ""
+            logger.info("WRITE setting=%s value=%r host=%s", setting_id, typed, inverter_conn.host)
             return f"OK — {meta.name} set to {typed}{unit}"
         except Exception as exc:
             return _err(exc)
@@ -409,6 +410,7 @@ def build_mcp(
                 eco_mode_power=eco_mode_power,
                 eco_mode_soc=eco_mode_soc,
             )
+            logger.info("WRITE operation_mode=%s eco_power=%d eco_soc=%d host=%s", mode, eco_mode_power, eco_mode_soc, inverter_conn.host)
             return f"Operation mode set to: {mode}"
         except Exception as exc:
             return _err(exc)
@@ -437,6 +439,7 @@ def build_mcp(
         try:
             inv = inverter_conn.get_inverter()
             await inv.set_grid_export_limit(limit_watts)
+            logger.info("WRITE grid_export_limit=%d host=%s", limit_watts, inverter_conn.host)
             return f"Grid export limit set to {limit_watts} W"
         except Exception as exc:
             return _err(exc)
@@ -468,6 +471,7 @@ def build_mcp(
                 return "depth_percent must be between 0 and 99"
             inv = inverter_conn.get_inverter()
             await inv.set_ongrid_battery_dod(depth_percent)
+            logger.info("WRITE battery_dod=%d host=%s", depth_percent, inverter_conn.host)
             return f"Battery depth of discharge set to {depth_percent}%"
         except Exception as exc:
             return _err(exc)

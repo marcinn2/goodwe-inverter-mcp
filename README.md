@@ -158,7 +158,23 @@ stringData:
   MCP_AUTH_TOKEN: "my-secret-token"
 ```
 
-If `MCP_AUTH_TOKEN` is empty or not set, authentication is disabled and all HTTP endpoints are publicly accessible.
+If `MCP_AUTH_TOKEN` is empty or not set, authentication is disabled and all HTTP endpoints are publicly accessible. The server will log a warning at startup when bound to a non-loopback address without a token.
+
+### TLS / HTTPS
+
+The MCP server itself does not terminate TLS. For any non-localhost deployment, place a TLS-terminating reverse proxy in front of it (nginx, Caddy, Traefik). Serving inverter data — which constitutes personal data under GDPR when linked to a household — over plain HTTP is a security risk.
+
+Example with Caddy (simplest option):
+
+```
+mcp.example.com {
+    reverse_proxy localhost:8000
+}
+```
+
+## Data Processing Notice
+
+This server processes data from a GoodWe solar inverter, including the inverter's IP address, serial number, and energy consumption metrics. When deployed in a home and operated by the homeowner for personal use, this processing falls under the GDPR household exemption (Art. 2(2)(c)) and GDPR does not apply. If deployed commercially — for example to monitor inverters belonging to third-party customers — the operator becomes a data controller under GDPR (EU) 2016/679 and must establish a lawful basis for processing (Art. 6), maintain records of processing activities (Art. 30), and ensure appropriate technical and organisational measures (Art. 32), including TLS encryption and access control.
 
 ## Docker
 

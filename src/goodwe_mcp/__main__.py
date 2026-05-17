@@ -200,6 +200,16 @@ examples:
     logging.getLogger("uvicorn.error").addFilter(_teardown_filter)
     logging.getLogger("goodwe.et").addFilter(_DowngradeSettingReadErrors())
 
+    _LOOPBACK = {"127.0.0.1", "localhost", "::1"}
+    if args.transport != "stdio" and args.host not in _LOOPBACK and not args.auth_token:
+        logging.getLogger("goodwe_mcp").warning(
+            "Security warning: server bound to %s:%d with no MCP_AUTH_TOKEN set — "
+            "all endpoints are publicly accessible. Set --auth-token or MCP_AUTH_TOKEN "
+            "to require bearer authentication.",
+            args.host,
+            args.port,
+        )
+
     mcp = build_mcp(
         host=args.host,
         port=args.port,

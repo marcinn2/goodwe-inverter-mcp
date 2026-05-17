@@ -11,5 +11,13 @@ services:
     # Needed when the inverter is on the host's local network
     # and the container cannot reach it via bridge networking.
     # Remove if your network setup routes the traffic correctly.
+    # Logs go to Docker's default json-file driver.
+    # Set a retention limit to avoid unbounded growth (inverter IP addresses
+    # in access logs may constitute personal data under GDPR).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     network_mode: host
     restart: unless-stopped
