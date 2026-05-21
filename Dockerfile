@@ -1,6 +1,8 @@
 # ── Stage 1: build ──────────────────────────────────────────────────────────
 FROM python:3.11-slim-bookworm AS builder
 
+LABEL org.opencontainers.image.source=https://github.com/marcinn2/goodwe-inverter-mcp
+
 # Bring in uv without installing it system-wide
 COPY --from=ghcr.io/astral-sh/uv:latest@sha256:1025398289b62de8269e70c45b91ffa37c373f38118d7da036fb8bb8efc85d97 /uv /usr/local/bin/uv
 
