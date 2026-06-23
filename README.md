@@ -2,6 +2,8 @@
 
 MCP server for monitoring and controlling **GoodWe solar inverters** over the local network.
 
+[![goodwe-inverter-mcp MCP server](https://glama.ai/mcp/servers/marcinn2/goodwe-inverter-mcp/badges/card.svg)](https://glama.ai/mcp/servers/marcinn2/goodwe-inverter-mcp)
+
 Built on the [`goodwe`](https://pypi.org/project/goodwe/) library and the [Model Context Protocol](https://modelcontextprotocol.io/) Python SDK.
 
 > **Based on** the [Home Assistant GoodWe integration](https://github.com/home-assistant/core/tree/dev/homeassistant/components/goodwe) — the sensor definitions, operation modes, settings, and inverter family support are modelled directly after that implementation.
